@@ -1,0 +1,15 @@
+{
+  "name": "POS & Inventory Web App",
+  "short_name": "POS App",
+  "start_url": "/cashier.php",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1170/1170576.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
