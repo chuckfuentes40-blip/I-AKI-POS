@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>POS System</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --text: #0f172a;
+      --border: #e2e8f0;
+      --cash: #16a34a;
+      --gcash: #0284c7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+    .nav-btn { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .app-container { display: flex; flex: 1; overflow: hidden; }
+    
+    /* Cashier View */
+    .cashier-layout { display: flex; width: 100%; }
+    .product-grid { flex: 2; padding: 20px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; }
+    .product-card { background: var(--surface); border: 1px solid var(--border); padding: 15px; border-radius: 8px; text-align: center; cursor: pointer; }
+    .cart-pane { flex: 1; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; }
+    .cart-items { flex: 1; overflow-y: auto; margin: 15px 0; }
+    .cart-item { display: flex; justify-content: space-between; margin-bottom: 10px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+    
+    /* Admin View */
+    .admin-layout { display: flex; width: 100%; }
+    .sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border); padding: 20px 10px; }
+    .sidebar button { width: 100%; text-align: left; padding: 12px; margin-bottom: 8px; background: none; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; }
+    .sidebar button.active { background: #eff6ff; color: var(--primary); }
+    .admin-content { flex: 1; padding: 20px; overflow-y: auto; }
+    
+    /* Dashboard Cards */
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+    .card { background: var(--surface); padding: 20px; border-radius: 8px; border: 1px solid var(--border); }
+    .card h4 { font-size: 0.85rem; color: #64748b; margin-bottom: 5px; }
+    .card .val { font-size: 1.4rem; font-weight: bold; }
+    
+    table { width: 100%; border-collapse: collapse; background: var(--surface); margin-top: 15px; }
+    th, td { border: 1px solid var(--border); padding: 10px; text-align: left; font-size: 0.9rem; }
+    th { background: #f1f5f9; }
+    
+    @media print {
+      body * { visibility: hidden; }
+      #printable-area, #printable-area * { visibility: visible; }
+      #printable-area { position: absolute; left: 0; top: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h2 id="app-title">POS Cashier</h2>
+    <button class="nav-btn" onclick="toggleRole()" id="role-toggle">Switch to Admin</button>
+  </header>
+
+  <div class="app-container">
+    <!-- CASHIER VIEW -->
+    <div id="cashier-view" class="cashier-layout">
+      <div class="product-grid" id="product-grid"></div>
+      <div class="cart-pane">
+        <h3>Current Order</h3>
+        <div class="cart-items" id="cart-items"></div>
+        <h4>Total: ₱<span id="cart-total">0.00</span></h4>
+        <div style="margin-top: 15px; display: flex; gap: 10px;">
+          <button class="nav-btn" style="background: var(--cash); flex: 1;" onclick="checkout('Cash')">Cash</button>
+          <button class="nav-btn" style="background: var(--gcash); flex: 1;" onclick="checkout('GCash')">GCash</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADMIN VIEW -->
+    <div id="admin-view" class="admin-layout" style="display: none;">
+      <div class="sidebar">
+        <button id="btn-home" class="active" onclick="switchAdminTab('home')">Home</button>
+        <button id="btn-reprint" onclick="switchAdminTab('reprint')">Reprint Receipt</button>
+        <button id="btn-report" onclick="switchAdminTab('report')">Print Report</button>
+      </div>
+      <div class="admin-content">
+        <!-- HOME DASHBOARD -->
+        <div id="tab-home">
+          <h3>Sales & Inventory Dashboard</h3>
+          <div class="metrics-grid" style="margin-top: 15px;">
+            <div class="card"><h4>TODAY (CASH)</h4><div class="val" id="dash-today-cash">₱0.00</div></div>
+            <div class="card"><h4>TODAY (GCASH)</h4><div class="val" id="dash-today-gcash">₱0.00</div></div>
+            <div class="card"><h4>THIS WEEK</h4><div class="val" id="dash-week-total">₱0.00</div></div>
+            <div class="card"><h4>THIS MONTH</h4><div class="val" id="dash-month-total">₱0.00</div></div>
+          </div>
+          <h4>Low Stock Alert</h4>
+          <table>
+            <thead><tr><th>Item</th><th>Stock Left</th></tr></thead>
+            <tbody id="low-stock-table"></tbody>
+          </table>
+        </div>
+
+        <!-- REPRINT RECEIPT -->
+        <div id="tab-reprint" style="display: none;">
+          <h3>Transaction History</h3>
+          <table>
+            <thead><tr><th>Tx ID</th><th>Date</th><th>Method</th><th>Total</th><th>Action</th></tr></thead>
+            <tbody id="reprint-table"></tbody>
+          </table>
+        </div>
+
+        <!-- PRINT REPORT -->
+        <div id="tab-report" style="display: none;">
+          <button class="nav-btn" onclick="window.print()" style="margin-bottom: 15px;">Print Summary Report</button>
+          <div id="printable-area">
+            <h2>Business Summary Report</h2>
+            <p>Generated on: <span id="report-date"></span></p>
+            <hr style="margin: 10px 0;">
+            <div class="metrics-grid">
+              <div class="card"><h4>Total Cash Sales</h4><div class="val" id="rep-cash">₱0.00</div></div>
+              <div class="card"><h4>Total GCash Sales</h4><div class="val" id="rep-gcash">₱0.00</div></div>
+            </div>
+            <h4>Current Stock Levels</h4>
+            <table>
+              <thead><tr><th>ID</th><th>Item Name</th><th>Category</th><th>Price</th><th>Stock</th></tr></thead>
+              <tbody id="report-stock-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let state = { inventory: [], sales: [], cart: [], role: 'cashier' };
+
+    window.onload = function() {
+      loadData();
+    };
+
+    function loadData() {
+      google.script.run.withSuccessHandler(data => {
+        state.inventory = data.inventory;
+        state.sales = data.sales;
+        renderProducts();
+        renderDashboard();
+      }).getAppData();
+    }
+
+    function toggleRole() {
+      state.role = state.role === 'cashier' ? 'admin' : 'cashier';
+      document.getElementById('cashier-view').style.display = state.role === 'cashier' ? 'flex' : 'none';
+      document.getElementById('admin-view').style.display = state.role === 'admin' ? 'flex' : 'none';
+      document.getElementById('app-title').innerText = state.role === 'cashier' ? 'POS Cashier' : 'Admin Dashboard';
+      document.getElementById('role-toggle').innerText = state.role === 'cashier' ? 'Switch to Admin' : 'Switch to Cashier';
+    }
+
+    /* Cashier Functions */
+    function renderProducts() {
+      const grid = document.getElementById('product-grid');
+      grid.innerHTML = state.inventory.map(item => `
+        <div class="product-card" onclick="addToCart('${item.id}')">
+          <b>${item.name}</b><br>
+          <small>₱${item.price.toFixed(2)}</small><br>
+          <small style="color:${item.stock < 5 ? 'red' : 'gray'}">Stock: ${item.stock}</small>
+        </div>
+      `).join('');
+    }
+
+    function addToCart(id) {
+      const item = state.inventory.find(i => i.id === id);
+      if(!item || item.stock <= 0) return alert('Out of stock');
+      const cartItem = state.cart.find(c => c.id === id);
+      if(cartItem) {
+        if(cartItem.qty < item.stock) cartItem.qty++;
+      } else {
+        state.cart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+      }
+      renderCart();
+    }
+
+    function renderCart() {
+      const container = document.getElementById('cart-items');
+      container.innerHTML = state.cart.map(c => `
+        <div class="cart-item">
+          <div>${c.name} (x${c.qty})</div>
+          <div>₱${(c.price * c.qty).toFixed(2)}</div>
+        </div>
+      `).join('');
+      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
+      document.getElementById('cart-total').innerText = total.toFixed(2);
+    }
+
+    function checkout(method) {
+      if(state.cart.length === 0) return;
+      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
+      google.script.run.withSuccessHandler(res => {
+        alert('Transaction Complete. ID: ' + res.txId);
+        state.cart = [];
+        renderCart();
+        loadData();
+      }).processTransaction(state.cart, method, total);
+    }
+
+    /* Admin Functions */
+    function switchAdminTab(tab) {
+      ['home', 'reprint', 'report'].forEach(t => {
+        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
+        document.getElementById(`btn-${t}`).className = t === tab ? 'active' : '';
+      });
+      if(tab === 'reprint') renderReprint();
+      if(tab === 'report') renderReport();
+    }
+
+    function renderDashboard() {
+      const now = new Date();
+      let todayCash = 0, todayGcash = 0, weekTotal = 0, monthTotal = 0;
+
+      state.sales.forEach(s => {
+        if(!s.date) return;
+        const d = new Date(s.date);
+        const isToday = d.toDateString() === now.toDateString();
+        const isMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        
+        if(isToday) {
+          if(s.method === 'Cash') todayCash += s.total;
+          if(s.method === 'GCash') todayGcash += s.total;
+        }
+        if(isMonth) monthTotal += s.total;
+      });
+
+      document.getElementById('dash-today-cash').innerText = `₱${todayCash.toFixed(2)}`;
+      document.getElementById('dash-today-gcash').innerText = `₱${todayGcash.toFixed(2)}`;
+      document.getElementById('dash-month-total').innerText = `₱${monthTotal.toFixed(2)}`;
+
+      document.getElementById('low-stock-table').innerHTML = state.inventory
+        .filter(i => i.stock < 5)
+        .map(i => `<tr><td>${i.name}</td><td>${i.stock}</td></tr>`).join('');
+    }
+
+    function renderReprint() {
+      document.getElementById('reprint-table').innerHTML = state.sales.map(s => `
+        <tr>
+          <td>${s.id}</td>
+          <td>${new Date(s.date).toLocaleString()}</td>
+          <td>${s.method}</td>
+          <td>₱${s.total.toFixed(2)}</td>
+          <td><button onclick="printReceipt('${s.id}')">Print</button></td>
+        </tr>
+      `).join('');
+    }
+
+    function printReceipt(txId) {
+      const sale = state.sales.find(s => s.id === txId);
+      const windowPrint = window.open('', '', 'width=300,height=400');
+      windowPrint.document.write(`
+        <div style="font-family:monospace; padding:10px;">
+          <h3>RECEIPT</h3>
+          <p>ID: ${sale.id}</p>
+          <p>Date: ${new Date(sale.date).toLocaleDateString()}</p>
+          <hr>
+          ${sale.cart.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price*i.qty).toFixed(2)}</div>`).join('')}
+          <hr>
+          <b>Total: ₱${sale.total.toFixed(2)}</b><br>
+          <b>Payment: ${sale.method}</b>
+        </div>
+      `);
+      windowPrint.document.close();
+      windowPrint.focus();
+      windowPrint.print();
+      windowPrint.close();
+    }
+
+    function renderReport() {
+      document.getElementById('report-date').innerText = new Date().toLocaleString();
+      let cash = state.sales.filter(s=>s.method==='Cash').reduce((a,b)=>a+b.total,0);
+      let gcash = state.sales.filter(s=>s.method==='GCash').reduce((a,b)=>a+b.total,0);
+      
+      document.getElementById('rep-cash').innerText = `₱${cash.toFixed(2)}`;
+      document.getElementById('rep-gcash').innerText = `₱${gcash.toFixed(2)}`;
+
+      document.getElementById('report-stock-table').innerHTML = state.inventory.map(i => `
+        <tr>
+          <td>${i.id}</td><td>${i.name}</td><td>${i.category}</td><td>₱${i.price.toFixed(2)}</td><td>${i.stock}</td>
+        </tr>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
