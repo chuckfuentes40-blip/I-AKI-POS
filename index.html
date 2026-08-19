@@ -193,19 +193,33 @@
   </div>
 
   <div class="app-container">
-    <!-- CASHIER VIEW -->
-    <div id="cashier-view" class="cashier-layout">
-      <div class="product-grid" id="product-grid"></div>
-      <div class="cart-pane">
-        <h3>Current Order</h3>
-        <div class="cart-items" id="cart-items"></div>
-        <h4>Total: ₱<span id="cart-total">0.00</span></h4>
-        <div style="margin-top: 15px; display: flex; gap: 10px;">
-          <button class="nav-btn" style="background: var(--cash); flex: 1;" onclick="checkout('Cash')">Cash</button>
-          <button class="nav-btn" style="background: var(--gcash); flex: 1;" onclick="checkout('GCash')">GCash</button>
-        </div>
-      </div>
+   <!-- CASHIER VIEW -->
+<div id="cashier-view" class="cashier-layout">
+  <div style="flex: 1; display: flex; flex-direction: column;">
+    
+    <!-- Camera Barcode Scanner Controls -->
+    <div style="margin-bottom: 12px;">
+      <button onclick="toggleCashierScanner()" class="nav-btn" style="background: #2563eb;">
+        📷 Scan Item Barcode
+      </button>
+      <div id="cashier-qr-reader" style="width: 280px; margin-top: 10px; display: none; border-radius: 8px; overflow: hidden;"></div>
     </div>
+
+    <!-- Product Grid -->
+    <div class="product-grid" id="product-grid"></div>
+  </div>
+
+  <!-- Cart Section -->
+  <div class="cart-pane">
+    <h3>Current Order</h3>
+    <div class="cart-items" id="cart-items"></div>
+    <h4>Total: ₱<span id="cart-total">0.00</span></h4>
+    <div style="margin-top: 15px; display: flex; gap: 10px;">
+      <button class="nav-btn" style="background: var(--cash); flex: 1;" onclick="checkout('Cash')">Cash</button>
+      <button class="nav-btn" style="background: var(--gcash); flex: 1;" onclick="checkout('GCash')">GCash</button>
+    </div>
+  </div>
+</div>
 
     <!-- ADMIN VIEW -->
     <div id="admin-view" class="admin-layout" style="display: none;">
@@ -272,16 +286,42 @@
     let state = { inventory: [], sales: [], cart: [], role: 'cashier', currentUser: null };
     let syncInterval = null;
     let html5QrCode = null;
+    let cashierQrCode = null;
     let isFetching = false;
+
+    // Hardware / Handheld USB Barcode Scanner listener variables
+    let barcodeBuffer = "";
+    let barcodeTimeout = null;
 
     window.onload = function() {
       loadData(false);
       startRealtimeSync();
+      initHardwareScannerListener();
     };
 
     function startRealtimeSync() {
       if (syncInterval) clearInterval(syncInterval);
       syncInterval = setInterval(() => { loadData(true); }, 5000);
+    }
+
+    /* Hardware Barcode Scanner Listener (USB / Bluetooth Guns) */
+    function initHardwareScannerListener() {
+      window.addEventListener('keydown', (e) => {
+        // Ignore typing when cashier is inside input/textarea fields
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+        if (e.key === 'Enter') {
+          if (barcodeBuffer.trim().length > 0) {
+            scanBarcodeToCart(barcodeBuffer.trim());
+            barcodeBuffer = "";
+          }
+        } else if (e.key.length === 1) { 
+          barcodeBuffer += e.key;
+          clearTimeout(barcodeTimeout);
+          // Scanner keys arrive rapidly (< 50ms); clear if manual slow typing
+          barcodeTimeout = setTimeout(() => { barcodeBuffer = ""; }, 200);
+        }
+      });
     }
 
     async function loadData(isSilent = false) {
@@ -350,7 +390,7 @@
       }, 3200);
     }
 
-    /* Add Item & Barcode Scanner Logic */
+    /* Admin Add Item - Camera Barcode Scanner */
     function openAddItemModal() {
       document.getElementById('item-id').value = '';
       document.getElementById('item-name').value = '';
@@ -406,6 +446,58 @@
       } else {
         if (readerElem) readerElem.style.display = 'none';
       }
+    }
+
+    /* Cashier Camera Barcode Scanner */
+    function toggleCashierScanner() {
+      const readerElem = document.getElementById('cashier-qr-reader');
+      if (!readerElem) return;
+
+      if (readerElem.style.display === 'none' || !readerElem.style.display) {
+        readerElem.style.display = 'block';
+        startCashierScanner();
+      } else {
+        stopCashierScanner();
+      }
+    }
+
+    function startCashierScanner() {
+      cashierQrCode = new Html5Qrcode("cashier-qr-reader");
+      cashierQrCode.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 220, height: 130 } },
+        (decodedText) => {
+          scanBarcodeToCart(decodedText);
+        },
+        () => {}
+      ).catch(err => {
+        showToast("Camera access failed: " + err, "error");
+        stopCashierScanner();
+      });
+    }
+
+    function stopCashierScanner() {
+      const readerElem = document.getElementById('cashier-qr-reader');
+      if (cashierQrCode && cashierQrCode.isScanning) {
+        cashierQrCode.stop().then(() => {
+          cashierQrCode.clear();
+          if (readerElem) readerElem.style.display = 'none';
+        }).catch(() => { if (readerElem) readerElem.style.display = 'none'; });
+      } else {
+        if (readerElem) readerElem.style.display = 'none';
+      }
+    }
+
+    /* Scan Barcode Logic (shared between USB gun & Camera) */
+    function scanBarcodeToCart(barcode) {
+      const item = state.inventory.find(i => String(i.id).toLowerCase() === String(barcode).toLowerCase());
+      if (!item) {
+        return showToast(`Item not found for barcode: ${barcode}`, "error");
+      }
+      
+      const price = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
+      addToCart(item.id);
+      showToast(`Scanned: ${item.name} (₱${price.toFixed(2)})`, "success");
     }
 
     async function submitNewItem() {
@@ -498,6 +590,7 @@
 
     function switchToAdminView() {
       state.role = 'admin';
+      stopCashierScanner();
       document.getElementById('cashier-view').style.display = 'none';
       document.getElementById('admin-view').style.display = 'flex';
       document.getElementById('app-title').innerText = 'Admin Dashboard';
@@ -546,13 +639,11 @@
       if (cartItem) {
         if (cartItem.qty < stockAvailable) {
           cartItem.qty++;
-          showToast(`Updated ${item.name} quantity`, "info");
         } else {
           showToast("Stock limit reached", "error");
         }
       } else {
         state.cart.push({ id: item.id, name: item.name, price: itemPrice, qty: 1 });
-        showToast(`Added ${item.name}`, "success");
       }
       renderCart();
     }
@@ -586,6 +677,10 @@
         
         if (res.success) {
           showToast(`Transaction Done! ID: ${res.txId}`, "success");
+          
+          // Print receipt immediately after checkout
+          printCashierReceipt(res.txId, [...state.cart], total, method);
+
           state.cart = [];
           renderCart();
           loadData(false);
@@ -595,6 +690,42 @@
       } catch (err) {
         showToast("Error: " + err.message, "error");
       }
+    }
+
+    /* Print Receipt right after checkout */
+    function printCashierReceipt(txId, cartItems, total, method) {
+      const windowPrint = window.open('', '', 'width=320,height=450');
+      if (!windowPrint) {
+        showToast("Pop-up blocked! Allow pop-ups to print receipts.", "error");
+        return;
+      }
+
+      windowPrint.document.write(`
+        <div style="font-family:monospace; padding:10px; font-size:12px;">
+          <h3 style="text-align:center; margin:0 0 5px 0;">OFFICIAL RECEIPT</h3>
+          <p style="margin:2px 0;">Tx ID: ${txId}</p>
+          <p style="margin:2px 0;">Date: ${new Date().toLocaleString()}</p>
+          <hr style="border:dashed 1px #ccc;">
+          ${cartItems.map(i => `
+            <div style="display:flex; justify-content:space-between; margin:3px 0;">
+              <span>${i.name} x${i.qty}</span>
+              <span>₱${(i.price * i.qty).toFixed(2)}</span>
+            </div>
+          `).join('')}
+          <hr style="border:dashed 1px #ccc;">
+          <div style="display:flex; justify-content:space-between;">
+            <b>TOTAL:</b><b>₱${parseFloat(total).toFixed(2)}</b>
+          </div>
+          <div style="display:flex; justify-content:space-between;">
+            <b>Payment Method:</b><b>${method}</b>
+          </div>
+          <p style="text-align:center; margin-top:15px;">Thank you for shopping!</p>
+        </div>
+      `);
+      windowPrint.document.close();
+      windowPrint.focus();
+      windowPrint.print();
+      windowPrint.close();
     }
 
     /* Admin Views */
@@ -656,23 +787,7 @@
         cartItems = [];
       }
 
-      const windowPrint = window.open('', '', 'width=300,height=400');
-      windowPrint.document.write(`
-        <div style="font-family:monospace; padding:10px;">
-          <h3>RECEIPT</h3>
-          <p>ID: ${sale.id}</p>
-          <p>Date: ${new Date(sale.date).toLocaleDateString()}</p>
-          <hr>
-          ${cartItems.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price * i.qty).toFixed(2)}</div>`).join('')}
-          <hr>
-          <b>Total: ₱${(parseFloat(sale.total) || 0).toFixed(2)}</b><br>
-          <b>Payment: ${sale.method}</b>
-        </div>
-      `);
-      windowPrint.document.close();
-      windowPrint.focus();
-      windowPrint.print();
-      windowPrint.close();
+      printCashierReceipt(sale.id, cartItems, sale.total, sale.method);
     }
 
     function renderReport() {
