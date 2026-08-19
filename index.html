@@ -131,159 +131,57 @@
   </div>
 
   <script>
-    let state = { inventory: [], sales: [], cart: [], role: 'cashier' };
+   // Replace with your actual Web App URL from Google Apps Script deployment
+const API_URL = "https://script.google.com/macros/s/AKfycbxdQEuDC91pFi7KiXb8wig5qCiq___uag6pM7IOQBcn9_3rm90Mebla3Ckd10x_0kwi/exec"; 
 
-    window.onload = function() {
-      loadData();
-    };
+let state = { inventory: [], sales: [], cart: [], role: 'cashier' };
 
-    function loadData() {
-      google.script.run.withSuccessHandler(data => {
-        state.inventory = data.inventory;
-        state.sales = data.sales;
-        renderProducts();
-        renderDashboard();
-      }).getAppData();
-    }
+window.onload = function() {
+  loadData();
+};
 
-    function toggleRole() {
-      state.role = state.role === 'cashier' ? 'admin' : 'cashier';
-      document.getElementById('cashier-view').style.display = state.role === 'cashier' ? 'flex' : 'none';
-      document.getElementById('admin-view').style.display = state.role === 'admin' ? 'flex' : 'none';
-      document.getElementById('app-title').innerText = state.role === 'cashier' ? 'POS Cashier' : 'Admin Dashboard';
-      document.getElementById('role-toggle').innerText = state.role === 'cashier' ? 'Switch to Admin' : 'Switch to Cashier';
-    }
+async function loadData() {
+  try {
+    const response = await fetch(`${API_URL}?action=getAppData`);
+    const data = await response.json();
+    state.inventory = data.inventory;
+    state.sales = data.sales;
+    renderProducts();
+    renderDashboard();
+  } catch (err) {
+    alert("Error fetching database: " + err.message);
+  }
+}
 
-    /* Cashier Functions */
-    function renderProducts() {
-      const grid = document.getElementById('product-grid');
-      grid.innerHTML = state.inventory.map(item => `
-        <div class="product-card" onclick="addToCart('${item.id}')">
-          <b>${item.name}</b><br>
-          <small>₱${item.price.toFixed(2)}</small><br>
-          <small style="color:${item.stock < 5 ? 'red' : 'gray'}">Stock: ${item.stock}</small>
-        </div>
-      `).join('');
-    }
+async function checkout(method) {
+  if (state.cart.length === 0) return;
+  const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
 
-    function addToCart(id) {
-      const item = state.inventory.find(i => i.id === id);
-      if(!item || item.stock <= 0) return alert('Out of stock');
-      const cartItem = state.cart.find(c => c.id === id);
-      if(cartItem) {
-        if(cartItem.qty < item.stock) cartItem.qty++;
-      } else {
-        state.cart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
-      }
+  try {
+    // Send request using text/plain to avoid Google Apps Script CORS preflight issues
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        cart: state.cart,
+        paymentMethod: method,
+        total: total
+      })
+    });
+    const res = await response.json();
+    
+    if (res.success) {
+      alert('Transaction Complete. ID: ' + res.txId);
+      state.cart = [];
       renderCart();
+      loadData();
+    } else {
+      alert('Transaction failed: ' + res.error);
     }
-
-    function renderCart() {
-      const container = document.getElementById('cart-items');
-      container.innerHTML = state.cart.map(c => `
-        <div class="cart-item">
-          <div>${c.name} (x${c.qty})</div>
-          <div>₱${(c.price * c.qty).toFixed(2)}</div>
-        </div>
-      `).join('');
-      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
-      document.getElementById('cart-total').innerText = total.toFixed(2);
-    }
-
-    function checkout(method) {
-      if(state.cart.length === 0) return;
-      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
-      google.script.run.withSuccessHandler(res => {
-        alert('Transaction Complete. ID: ' + res.txId);
-        state.cart = [];
-        renderCart();
-        loadData();
-      }).processTransaction(state.cart, method, total);
-    }
-
-    /* Admin Functions */
-    function switchAdminTab(tab) {
-      ['home', 'reprint', 'report'].forEach(t => {
-        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
-        document.getElementById(`btn-${t}`).className = t === tab ? 'active' : '';
-      });
-      if(tab === 'reprint') renderReprint();
-      if(tab === 'report') renderReport();
-    }
-
-    function renderDashboard() {
-      const now = new Date();
-      let todayCash = 0, todayGcash = 0, weekTotal = 0, monthTotal = 0;
-
-      state.sales.forEach(s => {
-        if(!s.date) return;
-        const d = new Date(s.date);
-        const isToday = d.toDateString() === now.toDateString();
-        const isMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        
-        if(isToday) {
-          if(s.method === 'Cash') todayCash += s.total;
-          if(s.method === 'GCash') todayGcash += s.total;
-        }
-        if(isMonth) monthTotal += s.total;
-      });
-
-      document.getElementById('dash-today-cash').innerText = `₱${todayCash.toFixed(2)}`;
-      document.getElementById('dash-today-gcash').innerText = `₱${todayGcash.toFixed(2)}`;
-      document.getElementById('dash-month-total').innerText = `₱${monthTotal.toFixed(2)}`;
-
-      document.getElementById('low-stock-table').innerHTML = state.inventory
-        .filter(i => i.stock < 5)
-        .map(i => `<tr><td>${i.name}</td><td>${i.stock}</td></tr>`).join('');
-    }
-
-    function renderReprint() {
-      document.getElementById('reprint-table').innerHTML = state.sales.map(s => `
-        <tr>
-          <td>${s.id}</td>
-          <td>${new Date(s.date).toLocaleString()}</td>
-          <td>${s.method}</td>
-          <td>₱${s.total.toFixed(2)}</td>
-          <td><button onclick="printReceipt('${s.id}')">Print</button></td>
-        </tr>
-      `).join('');
-    }
-
-    function printReceipt(txId) {
-      const sale = state.sales.find(s => s.id === txId);
-      const windowPrint = window.open('', '', 'width=300,height=400');
-      windowPrint.document.write(`
-        <div style="font-family:monospace; padding:10px;">
-          <h3>RECEIPT</h3>
-          <p>ID: ${sale.id}</p>
-          <p>Date: ${new Date(sale.date).toLocaleDateString()}</p>
-          <hr>
-          ${sale.cart.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price*i.qty).toFixed(2)}</div>`).join('')}
-          <hr>
-          <b>Total: ₱${sale.total.toFixed(2)}</b><br>
-          <b>Payment: ${sale.method}</b>
-        </div>
-      `);
-      windowPrint.document.close();
-      windowPrint.focus();
-      windowPrint.print();
-      windowPrint.close();
-    }
-
-    function renderReport() {
-      document.getElementById('report-date').innerText = new Date().toLocaleString();
-      let cash = state.sales.filter(s=>s.method==='Cash').reduce((a,b)=>a+b.total,0);
-      let gcash = state.sales.filter(s=>s.method==='GCash').reduce((a,b)=>a+b.total,0);
-      
-      document.getElementById('rep-cash').innerText = `₱${cash.toFixed(2)}`;
-      document.getElementById('rep-gcash').innerText = `₱${gcash.toFixed(2)}`;
-
-      document.getElementById('report-stock-table').innerHTML = state.inventory.map(i => `
-        <tr>
-          <td>${i.id}</td><td>${i.name}</td><td>${i.category}</td><td>₱${i.price.toFixed(2)}</td><td>${i.stock}</td>
-        </tr>
-      `).join('');
-    }
+  } catch (err) {
+    alert("Network error: " + err.message);
+  }
+}
   </script>
 </body>
 </html>
