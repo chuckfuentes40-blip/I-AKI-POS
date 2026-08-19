@@ -266,12 +266,13 @@
     </div>
   </div>
 
-  <script>
+<script>
     const API_URL = "https://script.google.com/macros/s/AKfycbzuv0Ah_z5nHmRTwBcFMrKNknFX5-M8qd0bl23rqvIKRDAAlxB9eMuuC0cQA2p9PeDS/exec"; 
 
     let state = { inventory: [], sales: [], cart: [], role: 'cashier', currentUser: null };
     let syncInterval = null;
     let html5QrCode = null;
+    let isFetching = false;
 
     window.onload = function() {
       loadData(false);
@@ -283,66 +284,61 @@
       syncInterval = setInterval(() => { loadData(true); }, 5000);
     }
 
-   async function loadData(isSilent = false) {
-  if (isFetching) return;
-  isFetching = true;
+    async function loadData(isSilent = false) {
+      if (isFetching) return;
+      isFetching = true;
 
-  try {
-    const response = await fetch(`${API_URL}?action=getAppData`, {
-      method: 'GET',
-      cache: 'no-store'
-    });
+      try {
+        const response = await fetch(`${API_URL}?action=getAppData`, {
+          method: 'GET',
+          cache: 'no-store'
+        });
 
-    // Handle HTTP 404 / 500 errors safely
-    if (!response.ok) {
-      throw new Error(`Server returned HTTP ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Server returned HTTP ${response.status}`);
+        }
+
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Invalid response format (Received HTML instead of JSON). Check deployment URL.");
+        }
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+
+        state.inventory = data.inventory || [];
+        state.sales = data.sales || [];
+
+        renderProducts();
+        if (state.role === 'admin') {
+          renderDashboard();
+        }
+
+        updateSyncStatus(true, "Live Sync");
+
+      } catch (err) {
+        updateSyncStatus(false, "Offline / Connection Lost");
+        
+        if (!isSilent) {
+          showToast(`Database Error: ${err.message}`, "error");
+        }
+      } finally {
+        isFetching = false;
+      }
     }
 
-    // Inspect Content-Type before parsing to avoid HTML '<' SyntaxError
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      throw new Error("Invalid response format (Received HTML instead of JSON). Check deployment URL.");
+    function updateSyncStatus(isOnline, text) {
+      const dot = document.getElementById('sync-dot');
+      const label = document.getElementById('sync-text');
+      
+      if (dot) dot.className = isOnline ? 'pulse-dot' : 'pulse-dot offline';
+      if (label) label.innerText = text;
     }
-
-    const data = await response.json();
-    if (data.error) throw new Error(data.error);
-
-    // Update state & render
-    state.inventory = data.inventory || [];
-    state.sales = data.sales || [];
-
-    renderProducts();
-    if (state.role === 'admin') {
-      renderDashboard();
-    }
-
-    // Mark UI as Online
-    updateSyncStatus(true, "Live Sync");
-
-  } catch (err) {
-    // Graceful Connection Lost handling
-    updateSyncStatus(false, "Offline / Connection Lost");
-    
-    if (!isSilent) {
-      showToast(`Database Error: ${err.message}`, "error");
-    }
-  } finally {
-    isFetching = false;
-  }
-}
-
-// Helper function to handle network status UI
-function updateSyncStatus(isOnline, text) {
-  const dot = document.getElementById('sync-dot');
-  const label = document.getElementById('sync-text');
-  
-  if (dot) dot.className = isOnline ? 'pulse-dot' : 'pulse-dot offline';
-  if (label) label.innerText = text;
-}
 
     /* Notification System */
     function showToast(message, type = 'info') {
       const container = document.getElementById('toast-container');
+      if (!container) return;
       const toast = document.createElement('div');
       toast.className = `toast ${type}`;
       let icon = type === 'success' ? '✅' : type === 'error' ? '⚠️' : 'ℹ️';
@@ -405,10 +401,10 @@ function updateSyncStatus(isOnline, text) {
       if (html5QrCode && html5QrCode.isScanning) {
         html5QrCode.stop().then(() => {
           html5QrCode.clear();
-          readerElem.style.display = 'none';
-        }).catch(() => { readerElem.style.display = 'none'; });
+          if (readerElem) readerElem.style.display = 'none';
+        }).catch(() => { if (readerElem) readerElem.style.display = 'none'; });
       } else {
-        readerElem.style.display = 'none';
+        if (readerElem) readerElem.style.display = 'none';
       }
     }
 
@@ -525,21 +521,28 @@ function updateSyncStatus(isOnline, text) {
     /* Cashier Functions */
     function renderProducts() {
       const grid = document.getElementById('product-grid');
-      grid.innerHTML = state.inventory.map(item => `
-        <div class="product-card" onclick="addToCart('${item.id}')">
-          <b>${item.name}</b><br>
-          <small>₱${(item.pricePcs || item.price).toFixed(2)}</small><br>
-          <small style="color:${item.stockPcs < 5 ? '#dc2626' : '#64748b'}">Stock: ${item.stockPcs}</small>
-        </div>
-      `).join('');
+      if (!grid) return;
+      grid.innerHTML = state.inventory.map(item => {
+        const price = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
+        const stock = item.stockPcs !== undefined ? item.stockPcs : (item.stock || 0);
+        return `
+          <div class="product-card" onclick="addToCart('${item.id}')">
+            <b>${item.name}</b><br>
+            <small>₱${price.toFixed(2)}</small><br>
+            <small style="color:${stock < 5 ? '#dc2626' : '#64748b'}">Stock: ${stock}</small>
+          </div>
+        `;
+      }).join('');
     }
 
     function addToCart(id) {
       const item = state.inventory.find(i => i.id === id);
-      const stockAvailable = item ? (item.stockPcs !== undefined ? item.stockPcs : item.stock) : 0;
+      const stockAvailable = item ? (item.stockPcs !== undefined ? item.stockPcs : (item.stock || 0)) : 0;
       if (!item || stockAvailable <= 0) return showToast("Item out of stock!", "error");
       
       const cartItem = state.cart.find(c => c.id === id);
+      const itemPrice = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
+
       if (cartItem) {
         if (cartItem.qty < stockAvailable) {
           cartItem.qty++;
@@ -548,7 +551,7 @@ function updateSyncStatus(isOnline, text) {
           showToast("Stock limit reached", "error");
         }
       } else {
-        state.cart.push({ id: item.id, name: item.name, price: item.pricePcs || item.price, qty: 1 });
+        state.cart.push({ id: item.id, name: item.name, price: itemPrice, qty: 1 });
         showToast(`Added ${item.name}`, "success");
       }
       renderCart();
@@ -556,6 +559,7 @@ function updateSyncStatus(isOnline, text) {
 
     function renderCart() {
       const container = document.getElementById('cart-items');
+      if (!container) return;
       container.innerHTML = state.cart.map(c => `
         <div class="cart-item">
           <div>${c.name} (x${c.qty})</div>
@@ -596,8 +600,10 @@ function updateSyncStatus(isOnline, text) {
     /* Admin Views */
     function switchAdminTab(tab) {
       ['home', 'reprint', 'report'].forEach(t => {
-        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
-        document.getElementById(`btn-${t}`).className = t === tab ? 'active' : '';
+        const el = document.getElementById(`tab-${t}`);
+        const btn = document.getElementById(`btn-${t}`);
+        if (el) el.style.display = t === tab ? 'block' : 'none';
+        if (btn) btn.className = t === tab ? 'active' : '';
       });
       if(tab === 'reprint') renderReprint();
       if(tab === 'report') renderReport();
@@ -610,11 +616,12 @@ function updateSyncStatus(isOnline, text) {
       state.sales.forEach(s => {
         if(!s.date) return;
         const d = new Date(s.date);
+        const total = parseFloat(s.total) || 0;
         if (d.toDateString() === now.toDateString()) {
-          if (s.method === 'Cash') todayCash += s.total;
-          if (s.method === 'GCash') todayGcash += s.total;
+          if (s.method === 'Cash') todayCash += total;
+          if (s.method === 'GCash') todayGcash += total;
         }
-        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) monthTotal += s.total;
+        if (d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()) monthTotal += total;
       });
 
       document.getElementById('dash-today-cash').innerText = `₱${todayCash.toFixed(2)}`;
@@ -622,8 +629,8 @@ function updateSyncStatus(isOnline, text) {
       document.getElementById('dash-month-total').innerText = `₱${monthTotal.toFixed(2)}`;
 
       document.getElementById('low-stock-table').innerHTML = state.inventory
-        .filter(i => (i.stockPcs !== undefined ? i.stockPcs : i.stock) < 5)
-        .map(i => `<tr><td>${i.name}</td><td>${i.stockPcs}</td><td>${i.stockPack}</td><td>${i.stockBox}</td></tr>`).join('');
+        .filter(i => (i.stockPcs !== undefined ? i.stockPcs : (i.stock || 0)) < 5)
+        .map(i => `<tr><td>${i.name}</td><td>${i.stockPcs || 0}</td><td>${i.stockPack || 0}</td><td>${i.stockBox || 0}</td></tr>`).join('');
     }
 
     function renderReprint() {
@@ -632,7 +639,7 @@ function updateSyncStatus(isOnline, text) {
           <td>${s.id}</td>
           <td>${new Date(s.date).toLocaleString()}</td>
           <td>${s.method}</td>
-          <td>₱${s.total.toFixed(2)}</td>
+          <td>₱${(parseFloat(s.total) || 0).toFixed(2)}</td>
           <td><button class="nav-btn" style="padding:4px 10px; font-size:0.8rem;" onclick="printReceipt('${s.id}')">Print</button></td>
         </tr>
       `).join('');
@@ -642,6 +649,13 @@ function updateSyncStatus(isOnline, text) {
       const sale = state.sales.find(s => s.id === txId);
       if(!sale) return showToast("Receipt not found.", "error");
 
+      let cartItems = [];
+      try {
+        cartItems = typeof sale.cart === 'string' ? JSON.parse(sale.cart) : (sale.cart || []);
+      } catch (e) {
+        cartItems = [];
+      }
+
       const windowPrint = window.open('', '', 'width=300,height=400');
       windowPrint.document.write(`
         <div style="font-family:monospace; padding:10px;">
@@ -649,9 +663,9 @@ function updateSyncStatus(isOnline, text) {
           <p>ID: ${sale.id}</p>
           <p>Date: ${new Date(sale.date).toLocaleDateString()}</p>
           <hr>
-          ${sale.cart.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price*i.qty).toFixed(2)}</div>`).join('')}
+          ${cartItems.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price * i.qty).toFixed(2)}</div>`).join('')}
           <hr>
-          <b>Total: ₱${sale.total.toFixed(2)}</b><br>
+          <b>Total: ₱${(parseFloat(sale.total) || 0).toFixed(2)}</b><br>
           <b>Payment: ${sale.method}</b>
         </div>
       `);
@@ -663,18 +677,26 @@ function updateSyncStatus(isOnline, text) {
 
     function renderReport() {
       document.getElementById('report-date').innerText = new Date().toLocaleString();
-      let cash = state.sales.filter(s=>s.method==='Cash').reduce((a,b)=>a+b.total,0);
-      let gcash = state.sales.filter(s=>s.method==='GCash').reduce((a,b)=>a+b.total,0);
+      let cash = state.sales.filter(s => s.method === 'Cash').reduce((a, b) => a + (parseFloat(b.total) || 0), 0);
+      let gcash = state.sales.filter(s => s.method === 'GCash').reduce((a, b) => a + (parseFloat(b.total) || 0), 0);
       
       document.getElementById('rep-cash').innerText = `₱${cash.toFixed(2)}`;
       document.getElementById('rep-gcash').innerText = `₱${gcash.toFixed(2)}`;
 
-      document.getElementById('report-stock-table').innerHTML = state.inventory.map(i => `
-        <tr>
-          <td>${i.id}</td><td>${i.name}</td><td>₱${i.pricePcs.toFixed(2)}</td><td>${i.stockPcs}</td><td>${i.stockPack}</td><td>${i.stockBox}</td>
-        </tr>
-      `).join('');
+      document.getElementById('report-stock-table').innerHTML = state.inventory.map(i => {
+        const price = i.pricePcs !== undefined ? i.pricePcs : (i.price || 0);
+        return `
+          <tr>
+            <td>${i.id}</td>
+            <td>${i.name}</td>
+            <td>₱${price.toFixed(2)}</td>
+            <td>${i.stockPcs || 0}</td>
+            <td>${i.stockPack || 0}</td>
+            <td>${i.stockBox || 0}</td>
+          </tr>
+        `;
+      }).join('');
     }
-  </script>
+</script>
 </body>
 </html>
