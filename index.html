@@ -19,6 +19,7 @@
     body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
     header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
     .nav-btn { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    .user-info { display: flex; align-items: center; gap: 12px; }
     .app-container { display: flex; flex: 1; overflow: hidden; }
     
     /* Cashier View */
@@ -45,6 +46,11 @@
     table { width: 100%; border-collapse: collapse; background: var(--surface); margin-top: 15px; }
     th, td { border: 1px solid var(--border); padding: 10px; text-align: left; font-size: 0.9rem; }
     th { background: #f1f5f9; }
+
+    /* Modal Styling */
+    .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .modal-box { background: var(--surface); padding: 25px; border-radius: 8px; width: 320px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    .modal-box input { width: 100%; padding: 10px; margin: 8px 0 15px; border: 1px solid var(--border); border-radius: 4px; }
     
     @media print {
       body * { visibility: hidden; }
@@ -57,8 +63,29 @@
 
   <header>
     <h2 id="app-title">POS Cashier</h2>
-    <button class="nav-btn" onclick="toggleRole()" id="role-toggle">Switch to Admin</button>
+    <div id="nav-actions">
+      <button class="nav-btn" onclick="openLoginModal()" id="role-toggle">Switch to Admin</button>
+      <div id="admin-user-bar" style="display: none;" class="user-info">
+        <span id="user-display" style="font-weight: 600;"></span>
+        <button class="nav-btn" style="background: #ef4444;" onclick="logout()">Logout</button>
+      </div>
+    </div>
   </header>
+
+  <!-- LOGIN MODAL -->
+  <div id="login-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <h3>Admin Login</h3>
+      <label style="font-size: 0.85rem; margin-top: 10px; display: block;">Username</label>
+      <input type="text" id="login-username" placeholder="Enter username">
+      <label style="font-size: 0.85rem; display: block;">Password</label>
+      <input type="password" id="login-password" placeholder="Enter password">
+      <div style="display: flex; gap: 10px;">
+        <button class="nav-btn" style="flex: 1;" onclick="handleLogin()">Login</button>
+        <button class="nav-btn" style="background: #64748b; flex: 1;" onclick="closeLoginModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
 
   <div class="app-container">
     <!-- CASHIER VIEW -->
@@ -89,7 +116,6 @@
           <div class="metrics-grid" style="margin-top: 15px;">
             <div class="card"><h4>TODAY (CASH)</h4><div class="val" id="dash-today-cash">₱0.00</div></div>
             <div class="card"><h4>TODAY (GCASH)</h4><div class="val" id="dash-today-gcash">₱0.00</div></div>
-            <div class="card"><h4>THIS WEEK</h4><div class="val" id="dash-week-total">₱0.00</div></div>
             <div class="card"><h4>THIS MONTH</h4><div class="val" id="dash-month-total">₱0.00</div></div>
           </div>
           <h4>Low Stock Alert</h4>
@@ -131,57 +157,240 @@
   </div>
 
   <script>
-   // Replace with your actual Web App URL from Google Apps Script deployment
-const API_URL = "https://script.google.com/macros/s/AKfycbxdQEuDC91pFi7KiXb8wig5qCiq___uag6pM7IOQBcn9_3rm90Mebla3Ckd10x_0kwi/exec"; 
+    const API_URL = "https://script.google.com/macros/s/AKfycbxdQEuDC91pFi7KiXb8wig5qCiq___uag6pM7IOQBcn9_3rm90Mebla3Ckd10x_0kwi/exec"; 
 
-let state = { inventory: [], sales: [], cart: [], role: 'cashier' };
+    let state = { inventory: [], sales: [], cart: [], role: 'cashier', currentUser: null };
 
-window.onload = function() {
-  loadData();
-};
-
-async function loadData() {
-  try {
-    const response = await fetch(`${API_URL}?action=getAppData`);
-    const data = await response.json();
-    state.inventory = data.inventory;
-    state.sales = data.sales;
-    renderProducts();
-    renderDashboard();
-  } catch (err) {
-    alert("Error fetching database: " + err.message);
-  }
-}
-
-async function checkout(method) {
-  if (state.cart.length === 0) return;
-  const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
-
-  try {
-    // Send request using text/plain to avoid Google Apps Script CORS preflight issues
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({
-        cart: state.cart,
-        paymentMethod: method,
-        total: total
-      })
-    });
-    const res = await response.json();
-    
-    if (res.success) {
-      alert('Transaction Complete. ID: ' + res.txId);
-      state.cart = [];
-      renderCart();
+    window.onload = function() {
       loadData();
-    } else {
-      alert('Transaction failed: ' + res.error);
+    };
+
+    async function loadData() {
+      try {
+        const response = await fetch(`${API_URL}?action=getAppData`);
+        const data = await response.json();
+        state.inventory = data.inventory;
+        state.sales = data.sales;
+        renderProducts();
+        renderDashboard();
+      } catch (err) {
+        alert("Error fetching database: " + err.message);
+      }
     }
-  } catch (err) {
-    alert("Network error: " + err.message);
-  }
-}
+
+    /* Auth & Navigation */
+    function openLoginModal() {
+      document.getElementById('login-username').value = '';
+      document.getElementById('login-password').value = '';
+      document.getElementById('login-modal').style.display = 'flex';
+    }
+
+    function closeLoginModal() {
+      document.getElementById('login-modal').style.display = 'none';
+    }
+
+    async function handleLogin() {
+      const usernameInput = document.getElementById('login-username').value;
+      const passwordInput = document.getElementById('login-password').value;
+
+      if (!usernameInput || !passwordInput) {
+        return alert("Please fill in both fields.");
+      }
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "login",
+            username: usernameInput,
+            password: passwordInput
+          })
+        });
+        const res = await response.json();
+
+        if (res.success) {
+          state.currentUser = res.username;
+          closeLoginModal();
+          switchToAdminView();
+        } else {
+          alert(res.message || "Invalid credentials.");
+        }
+      } catch (err) {
+        alert("Login failed: " + err.message);
+      }
+    }
+
+    function switchToAdminView() {
+      state.role = 'admin';
+      document.getElementById('cashier-view').style.display = 'none';
+      document.getElementById('admin-view').style.display = 'flex';
+      document.getElementById('app-title').innerText = 'Admin Dashboard';
+      document.getElementById('role-toggle').style.display = 'none';
+      document.getElementById('admin-user-bar').style.display = 'flex';
+      document.getElementById('user-display').innerText = `👤 ${state.currentUser}`;
+      renderDashboard();
+    }
+
+    function logout() {
+      state.currentUser = null;
+      state.role = 'cashier';
+      document.getElementById('cashier-view').style.display = 'flex';
+      document.getElementById('admin-view').style.display = 'none';
+      document.getElementById('app-title').innerText = 'POS Cashier';
+      document.getElementById('role-toggle').style.display = 'block';
+      document.getElementById('admin-user-bar').style.display = 'none';
+    }
+
+    /* Cashier Functions */
+    function renderProducts() {
+      const grid = document.getElementById('product-grid');
+      grid.innerHTML = state.inventory.map(item => `
+        <div class="product-card" onclick="addToCart('${item.id}')">
+          <b>${item.name}</b><br>
+          <small>₱${item.price.toFixed(2)}</small><br>
+          <small style="color:${item.stock < 5 ? 'red' : 'gray'}">Stock: ${item.stock}</small>
+        </div>
+      `).join('');
+    }
+
+    function addToCart(id) {
+      const item = state.inventory.find(i => i.id === id);
+      if(!item || item.stock <= 0) return alert('Out of stock');
+      const cartItem = state.cart.find(c => c.id === id);
+      if(cartItem) {
+        if(cartItem.qty < item.stock) cartItem.qty++;
+      } else {
+        state.cart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+      }
+      renderCart();
+    }
+
+    function renderCart() {
+      const container = document.getElementById('cart-items');
+      container.innerHTML = state.cart.map(c => `
+        <div class="cart-item">
+          <div>${c.name} (x${c.qty})</div>
+          <div>₱${(c.price * c.qty).toFixed(2)}</div>
+        </div>
+      `).join('');
+      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
+      document.getElementById('cart-total').innerText = total.toFixed(2);
+    }
+
+    async function checkout(method) {
+      if (state.cart.length === 0) return;
+      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "checkout",
+            cart: state.cart,
+            paymentMethod: method,
+            total: total
+          })
+        });
+        const res = await response.json();
+        
+        if (res.success) {
+          alert('Transaction Complete. ID: ' + res.txId);
+          state.cart = [];
+          renderCart();
+          loadData();
+        } else {
+          alert('Transaction failed: ' + res.error);
+        }
+      } catch (err) {
+        alert("Network error: " + err.message);
+      }
+    }
+
+    /* Admin Functions */
+    function switchAdminTab(tab) {
+      ['home', 'reprint', 'report'].forEach(t => {
+        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
+        document.getElementById(`btn-${t}`).className = t === tab ? 'active' : '';
+      });
+      if(tab === 'reprint') renderReprint();
+      if(tab === 'report') renderReport();
+    }
+
+    function renderDashboard() {
+      const now = new Date();
+      let todayCash = 0, todayGcash = 0, monthTotal = 0;
+
+      state.sales.forEach(s => {
+        if(!s.date) return;
+        const d = new Date(s.date);
+        const isToday = d.toDateString() === now.toDateString();
+        const isMonth = d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        
+        if(isToday) {
+          if(s.method === 'Cash') todayCash += s.total;
+          if(s.method === 'GCash') todayGcash += s.total;
+        }
+        if(isMonth) monthTotal += s.total;
+      });
+
+      document.getElementById('dash-today-cash').innerText = `₱${todayCash.toFixed(2)}`;
+      document.getElementById('dash-today-gcash').innerText = `₱${todayGcash.toFixed(2)}`;
+      document.getElementById('dash-month-total').innerText = `₱${monthTotal.toFixed(2)}`;
+
+      document.getElementById('low-stock-table').innerHTML = state.inventory
+        .filter(i => i.stock < 5)
+        .map(i => `<tr><td>${i.name}</td><td>${i.stock}</td></tr>`).join('');
+    }
+
+    function renderReprint() {
+      document.getElementById('reprint-table').innerHTML = state.sales.map(s => `
+        <tr>
+          <td>${s.id}</td>
+          <td>${new Date(s.date).toLocaleString()}</td>
+          <td>${s.method}</td>
+          <td>₱${s.total.toFixed(2)}</td>
+          <td><button onclick="printReceipt('${s.id}')">Print</button></td>
+        </tr>
+      `).join('');
+    }
+
+    function printReceipt(txId) {
+      const sale = state.sales.find(s => s.id === txId);
+      const windowPrint = window.open('', '', 'width=300,height=400');
+      windowPrint.document.write(`
+        <div style="font-family:monospace; padding:10px;">
+          <h3>RECEIPT</h3>
+          <p>ID: ${sale.id}</p>
+          <p>Date: ${new Date(sale.date).toLocaleDateString()}</p>
+          <hr>
+          ${sale.cart.map(i => `<div>${i.name} x${i.qty} - ₱${(i.price*i.qty).toFixed(2)}</div>`).join('')}
+          <hr>
+          <b>Total: ₱${sale.total.toFixed(2)}</b><br>
+          <b>Payment: ${sale.method}</b>
+        </div>
+      `);
+      windowPrint.document.close();
+      windowPrint.focus();
+      windowPrint.print();
+      windowPrint.close();
+    }
+
+    function renderReport() {
+      document.getElementById('report-date').innerText = new Date().toLocaleString();
+      let cash = state.sales.filter(s=>s.method==='Cash').reduce((a,b)=>a+b.total,0);
+      let gcash = state.sales.filter(s=>s.method==='GCash').reduce((a,b)=>a+b.total,0);
+      
+      document.getElementById('rep-cash').innerText = `₱${cash.toFixed(2)}`;
+      document.getElementById('rep-gcash').innerText = `₱${gcash.toFixed(2)}`;
+
+      document.getElementById('report-stock-table').innerHTML = state.inventory.map(i => `
+        <tr>
+          <td>${i.id}</td><td>${i.name}</td><td>${i.category}</td><td>₱${i.price.toFixed(2)}</td><td>${i.stock}</td>
+        </tr>
+      `).join('');
+    }
   </script>
 </body>
 </html>
