@@ -490,15 +490,21 @@
 
     /* Scan Barcode Logic (shared between USB gun & Camera) */
     function scanBarcodeToCart(barcode) {
-      const item = state.inventory.find(i => String(i.id).toLowerCase() === String(barcode).toLowerCase());
-      if (!item) {
-        return showToast(`Item not found for barcode: ${barcode}`, "error");
-      }
-      
-      const price = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
-      addToCart(item.id);
-      showToast(`Scanned: ${item.name} (₱${price.toFixed(2)})`, "success");
-    }
+  if (!Array.isArray(state.inventory) || state.inventory.length === 0) {
+    return showToast("Inventory data is still loading...", "error");
+  }
+
+  const cleanBarcode = String(barcode).trim().toLowerCase();
+  const item = state.inventory.find(i => i && i.id && String(i.id).trim().toLowerCase() === cleanBarcode);
+
+  if (!item) {
+    return showToast(`Item not found for barcode: ${barcode}`, "error");
+  }
+
+  addToCart(item.id);
+  const price = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
+  showToast(`Scanned: ${item.name} (₱${price.toFixed(2)})`, "success");
+}
 
     async function submitNewItem() {
       const itemData = {
@@ -627,39 +633,72 @@
         `;
       }).join('');
     }
+/* Cart Management Functions */
+function addToCart(id) {
+  if (!Array.isArray(state.inventory)) state.inventory = [];
+  if (!Array.isArray(state.cart)) state.cart = [];
 
-    function addToCart(id) {
-      const item = state.inventory.find(i => i.id === id);
-      const stockAvailable = item ? (item.stockPcs !== undefined ? item.stockPcs : (item.stock || 0)) : 0;
-      if (!item || stockAvailable <= 0) return showToast("Item out of stock!", "error");
-      
-      const cartItem = state.cart.find(c => c.id === id);
-      const itemPrice = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
+  const item = state.inventory.find(i => String(i.id).trim() === String(id).trim());
+  const stockAvailable = item ? (item.stockPcs !== undefined ? item.stockPcs : (item.stock || 0)) : 0;
+  
+  if (!item || stockAvailable <= 0) {
+    return showToast("Item out of stock or invalid!", "error");
+  }
+  
+  const cartItem = state.cart.find(c => String(c.id).trim() === String(id).trim());
+  const itemPrice = item.pricePcs !== undefined ? item.pricePcs : (item.price || 0);
 
-      if (cartItem) {
-        if (cartItem.qty < stockAvailable) {
-          cartItem.qty++;
-        } else {
-          showToast("Stock limit reached", "error");
-        }
-      } else {
-        state.cart.push({ id: item.id, name: item.name, price: itemPrice, qty: 1 });
-      }
-      renderCart();
+  if (cartItem) {
+    if (cartItem.qty < stockAvailable) {
+      cartItem.qty++;
+    } else {
+      showToast("Stock limit reached", "error");
     }
+  } else {
+    state.cart.push({ id: item.id, name: item.name, price: itemPrice, qty: 1 });
+  }
+  renderCart();
+}
+  /* Deduct 1 piece from cart */
+function removeFromCart(id) {
+  if (!Array.isArray(state.cart)) return;
+  const cartItem = state.cart.find(c => String(c.id).trim() === String(id).trim());
+  if (!cartItem) return;
 
+  if (cartItem.qty > 1) {
+    cartItem.qty--;
+  } else {
+    state.cart = state.cart.filter(c => String(c.id).trim() !== String(id).trim());
+  }
+  renderCart();
+}
+  /* Remove entire line item from cart */
+function deleteFromCart(id) {
+  if (!Array.isArray(state.cart)) return;
+  state.cart = state.cart.filter(c => String(c.id).trim() !== String(id).trim());
+  renderCart();
+}
     function renderCart() {
-      const container = document.getElementById('cart-items');
-      if (!container) return;
-      container.innerHTML = state.cart.map(c => `
-        <div class="cart-item">
-          <div>${c.name} (x${c.qty})</div>
-          <div>₱${(c.price * c.qty).toFixed(2)}</div>
-        </div>
-      `).join('');
-      const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
-      document.getElementById('cart-total').innerText = total.toFixed(2);
-    }
+  const container = document.getElementById('cart-items');
+  if (!container) return;
+  if (!Array.isArray(state.cart)) state.cart = [];
+
+  container.innerHTML = state.cart.map(c => `
+    <div class="cart-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 6px; border-bottom: 1px solid #e2e8f0;">
+      <div>
+        <b>${c.name}</b><br>
+        <small>₱${c.price.toFixed(2)} x ${c.qty} = ₱${(c.price * c.qty).toFixed(2)}</small>
+      </div>
+      <div style="display: flex; gap: 4px; align-items: center;">
+        <button onclick="removeFromCart('${c.id}')" title="Deduct 1 pc" style="background: #f59e0b; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold;">-1</button>
+        <button onclick="deleteFromCart('${c.id}')" title="Remove Item" style="background: #ef4444; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-weight: bold;">✕</button>
+      </div>
+    </div>
+  `).join('');
+
+  const total = state.cart.reduce((sum, i) => sum + (i.price * i.qty), 0);
+  document.getElementById('cart-total').innerText = total.toFixed(2);
+}
 
     async function checkout(method) {
       if (state.cart.length === 0) return showToast("Cart is empty!", "error");
