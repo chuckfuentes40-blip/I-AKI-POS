@@ -222,6 +222,10 @@
     <!-- CASHIER VIEW -->
     <div id="cashier-view" class="cashier-layout">
       <div style="flex: 1; display: flex; flex-direction: column;">
+
+        <button onclick="switchCashierCamera()" style="padding: 6px 12px; margin-bottom: 8px;">
+          🔄 Flip Camera
+        </button>
         
         <!-- Camera Barcode Scanner Controls -->
         <div style="margin-bottom: 12px;">
@@ -489,20 +493,20 @@
       }
     }
 
-    function startCashierScanner() {
-      cashierQrCode = new Html5Qrcode("cashier-qr-reader");
-      cashierQrCode.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 220, height: 130 } },
-        (decodedText) => {
-          scanBarcodeToCart(decodedText);
-        },
-        () => {}
-      ).catch(err => {
-        showToast("Camera access failed: " + err, "error");
-        stopCashierScanner();
-      });
-    }
+   function startCashierScanner() {
+  cashierQrCode = new Html5Qrcode("cashier-qr-reader");
+  cashierQrCode.start(
+    { facingMode: cashierFacingMode }, // Dynamically switches between 'environment' and 'user'
+    { fps: 10, qrbox: { width: 220, height: 130 } },
+    (decodedText) => {
+      scanBarcodeToCart(decodedText);
+    },
+    () => {}
+  ).catch(err => {
+    showToast("Camera access failed: " + err, "error");
+    stopCashierScanner();
+  });
+}
 
     function stopCashierScanner() {
       const readerElem = document.getElementById('cashier-qr-reader');
@@ -1018,6 +1022,22 @@ function printCashierReceipt(txId, cartItems, total, method, cashTendered = 0, c
   windowPrint.focus();
   windowPrint.print();
   windowPrint.close();
+}
+
+  // Add this near your other state variables at the top of <script>
+let cashierFacingMode = "environment"; // "environment" = Back Cam, "user" = Front Cam
+
+// Function to toggle between Front and Back cameras
+async function switchCashierCamera() {
+  cashierFacingMode = cashierFacingMode === "environment" ? "user" : "environment";
+  
+  if (cashierQrCode && cashierQrCode.isScanning) {
+    await cashierQrCode.stop();
+    cashierQrCode.clear();
+    startCashierScanner();
+  }
+  
+  showToast(`Switched to ${cashierFacingMode === 'user' ? 'Front' : 'Back'} Camera`, "info");
 }
 </script>
 </body>
