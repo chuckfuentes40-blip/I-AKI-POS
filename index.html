@@ -488,6 +488,35 @@
       }
     }
 
+  /* Anti-Duplicate Scan Variables */
+let lastScannedCode = "";
+let lastScanTime = 0;
+const SCAN_COOLDOWN_MS = 1500; // 1.5 seconds delay before scanning the SAME item again
+
+/* Web Audio API Beep Generator */
+function playBeepSound() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioCtx.createOscillator();
+    const gainNode = audioCtx.createGain();
+
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 1800; // Frequency in Hz (Standard POS scanner pitch)
+    gainNode.gain.value = 0.15; // Volume level
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioCtx.destination);
+
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      audioCtx.close();
+    }, 120); // Sound duration in milliseconds
+  } catch (err) {
+    console.log("Audio play blocked by browser permissions:", err);
+  }
+}
+
     /* Scan Barcode Logic (shared between USB gun & Camera) */
     function scanBarcodeToCart(barcode) {
   if (!Array.isArray(state.inventory) || state.inventory.length === 0) {
